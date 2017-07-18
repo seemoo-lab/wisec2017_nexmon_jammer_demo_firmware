@@ -1,0 +1,140 @@
+--- ../gen/ucode.asm	2017-07-18 15:18:41.000000000 -0400
++++ ucode.asm	2017-07-18 15:23:35.000000000 -0400
+@@ -3,0 +4,27 @@
++#include "../include/macros.inc"
++#include "../include/wlc_phyreg_ac.inc"
++#define SPARE1 r54
++#define SPARE2 r55
++#define SPARE3 r56
++#define PHY400 r57
++#define SPINNING r60
++#define TONE_REPETITION 10
++#define QOSDATA [SHM(0x1340)]
++#define BEACON [SHM(0x1342)]
++#define OTHER [SHM(0x1344)]
++#define QOSDATA_TARGET_MAC [SHM(0x1346)]
++#define ACK [SHM(0x1348)]
++#define SENDACK [SHM(0x134A)]
++#define TARGET_PORT_FOUND [SHM(0x1352)]
++#define PACKLATE [SHM(0x1354)]
++#define DELTACLOCK1 [SHM(0x1360)]
++#define DELTACLOCK2 [SHM(0x1362)]
++#define DELTACLOCK3 [SHM(0x1364)]
++#define JAMMER_TYPE [SHM(0x1372)]
++#define JAMMER_TYPE_DISABLED 0
++#define JAMMER_TYPE_SIMPLE 1
++#define JAMMER_TYPE_ACKNOWLEDGING 2
++#define JAMMER_TARGET_PORT [SHM(0x1374)]
++#define JAMMER_IDFT_SIZE [SHM(0x1376)]
++#define JAMMER_LOOP_COUNT [SHM(0x1378)]
++#define CLOCKREAD [SHM(0x1380)]
+@@ -31,0 +59,8 @@
++ je SPINNING, 0, keep_spinning
++ mov 0x403, r33
++ calls L52
++ jnzxh SPR_Ext_IHR_Data & 0x1, keep_spinning
++ phy_reg_write(0x400, PHY400)
++ mov 0, SPINNING
++ sub SPR_TSF_WORD0, CLOCKREAD, DELTACLOCK2
++keep_spinning:
+@@ -2591,0 +2627,3 @@
++ je SENDACK, 0, skip+
++ calls transmit_jamming_signal
++skip:
+@@ -2708,0 +2747,3 @@
++ mov SPR_TSF_WORD0, CLOCKREAD
++ mov 0, SPINNING
++ mov 0, SENDACK
+@@ -2853,0 +2895,68 @@
++#define PLCP_HDR_LEN 6
++#define WLAN_ACK_HDR_LEN 10
++#define WLAN_QOS_DATA_HDR_LEN 26
++#define LLC_HDR_LEN 8
++#define IPV4_HDR_LEN 20
++#define UDP_HDR_LEN 8
++#define TYPE_QOS_DATA 0x88
++#define TYPE_BEACON 0x80
++#define TYPE_ACK 0xd4
++#define SPIN_UNTIL_WLAN_TYPE (PLCP_HDR_LEN + 1)
++#define SPIN_UNTIL_UDP_DST_PORT (PLCP_HDR_LEN + WLAN_QOS_DATA_HDR_LEN + LLC_HDR_LEN + IPV4_HDR_LEN + 4)
++#define spin_until(length,skip_label) \
++ spin_rx_header: \
++ jext COND_RX_COMPLETE, spin_rx_end+ \
++ jl SPR_RXE_FRAMELEN, length, spin_rx_header- \
++ spin_rx_end: \
++ jl SPR_RXE_FRAMELEN, length, skip_label
++ spin_until(SPIN_UNTIL_WLAN_TYPE, skip+)
++ and [3,off1], 0xff, SPARE1
++ je SPARE1, TYPE_ACK, handle_ack
++ je SPARE1, TYPE_QOS_DATA, handle_qos_data
++ je SPARE1, TYPE_BEACON, handle_beacon
++ jmp handle_other
++handle_ack:
++ add ACK, 1, ACK
++ jmp skip+
++handle_qos_data:
++ add QOSDATA, 1, QOSDATA
++ spin_until(SPIN_UNTIL_UDP_DST_PORT, skip+)
++ mov 0x454e, SPARE1
++ jne [5,off1], SPARE1, L720
++ mov 0x4d58, SPARE1
++ jne [6,off1], SPARE1, L720
++ mov 0x4e4f, SPARE1
++ jne [7,off1], SPARE1, L720
++ mov 0x414a, SPARE1
++ jne [8,off1], SPARE1, L720
++ mov 0x4d4d, SPARE1
++ jne [9,off1], SPARE1, L720
++ mov 0x5245, SPARE1
++ jne [10,off1], SPARE1, L720
++ add QOSDATA_TARGET_MAC, 1, QOSDATA_TARGET_MAC
++ je JAMMER_TYPE, JAMMER_TYPE_DISABLED, skip+
++ and [20,off1], 0xff, SPARE1
++ jne SPARE1, 0x45, skip+
++ sr [24,off1], 8, SPARE1
++ jne SPARE1, 0x11, skip+
++ mov JAMMER_TARGET_PORT, SPARE1
++ jne [30,off1], SPARE1, L720
++ jne [31,off1], SPARE1, L720
++ add TARGET_PORT_FOUND, 1, TARGET_PORT_FOUND
++ jext COND_RX_COMPLETE, too_late
++ jne JAMMER_TYPE, JAMMER_TYPE_SIMPLE, next_type+
++ calls transmit_jamming_signal
++ jmp skip+
++next_type:
++ jne JAMMER_TYPE, JAMMER_TYPE_ACKNOWLEDGING, skip+
++ mov 1, SENDACK
++ jmp skip+
++too_late:
++ add PACKLATE, 1, PACKLATE
++ jmp skip+
++handle_beacon:
++ add BEACON, 1, BEACON
++ jmp skip+
++handle_other:
++ add OTHER, 1, OTHER
++skip:
+@@ -3291,0 +3401 @@
++ jne SENDACK, 0, L588
+@@ -3382,0 +3493,3 @@
++ je SENDACK, 0, skip+
++ mov 0x4001, r17
++skip:
+@@ -3758,0 +3872,3 @@
++ je SENDACK, 0, skip+
++ jmp L442
++skip:
+@@ -6934,0 +7051,13 @@
++transmit_jamming_signal:
++ sub SPR_TSF_WORD0, CLOCKREAD, DELTACLOCK1
++ phy_reg_and(ACPHY_macbasedDACPlay(rev), 0xFFFE)
++ phy_reg_write(ACPHY_sampleDepthCount(rev), JAMMER_IDFT_SIZE)
++ phy_reg_write(ACPHY_sampleLoopCount(rev), JAMMER_LOOP_COUNT)
++ phy_reg_write(ACPHY_sampleInitWaitCount(rev), 0)
++ phy_reg_read(ACPHY_RfseqMode(rev), PHY400)
++ phy_reg_or(ACPHY_RfseqMode(rev), ACPHY_RfseqMode_CoreActv_override_MASK(rev))
++ phy_reg_and(ACPHY_sampleCmd(rev), 0xfffa)
++ phy_reg_and(ACPHY_iqloCalCmdGctl(0), 0x3fff)
++ phy_reg_or(ACPHY_sampleCmd(rev), 1)
++ mov 1, SPINNING
++ rets
